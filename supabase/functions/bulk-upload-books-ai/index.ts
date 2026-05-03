@@ -262,7 +262,7 @@ async function downloadAndUploadBook(
       if (pageCount) {
         console.log(`[AI Bulk] ✅ تم حساب عدد صفحات PDF: ${pageCount}`);
       } else {
-        throw new Error("تعذر حساب عدد صفحات PDF بدقة، لذلك تم رفض رفع الكتاب");
+        console.warn("[AI Bulk] ⚠️ تعذر حساب عدد صفحات PDF مبدئيًا، سيتم المتابعة والمحاولة لاحقًا");
       }
     }
 
