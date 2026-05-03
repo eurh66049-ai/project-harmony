@@ -295,9 +295,13 @@ const BulkBookUploaderAI: React.FC<BulkBookUploaderAIProps> = ({ onUploadComplet
         const progressTimer = window.setInterval(() => {
           setActiveBookProgress((prev) => Math.min(prev + 3, 92));
         }, 1200);
-        const batchResponse = await uploadBatch(batch);
-        window.clearInterval(progressTimer);
-        setActiveBookProgress(100);
+        let batchResponse: UploadBatchResult;
+        try {
+          batchResponse = await uploadBatch(batch);
+          setActiveBookProgress(100);
+        } finally {
+          window.clearInterval(progressTimer);
+        }
         batchResponse.results.forEach((result, index) => {
           const book = batch[index] || batch.find((b) => b.title === result.title) || batch[0];
 
@@ -360,7 +364,9 @@ const BulkBookUploaderAI: React.FC<BulkBookUploaderAIProps> = ({ onUploadComplet
   };
 
   const totalProcessed = results.success + results.failed + results.duplicates;
-  const progress = books.length > 0 ? Math.min(100, (totalProcessed / books.length) * 100) : 0;
+  const progress = books.length > 0
+    ? Math.min(100, ((totalProcessed + (uploading ? activeBookProgress / 100 : 0)) / books.length) * 100)
+    : 0;
 
   return (
     <div className="space-y-6" dir="rtl">
