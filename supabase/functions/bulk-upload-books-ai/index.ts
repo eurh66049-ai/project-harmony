@@ -541,8 +541,13 @@ async function retryAuthorLookup(
   });
 }
 
-async function addWatermarkIfPossible(bookFileUrl: string, extension: string): Promise<string> {
-  if (!bookFileUrl || extension !== "pdf") return bookFileUrl;
+async function addWatermarkIfPossible(
+  bookFileUrl: string,
+  extension: string,
+): Promise<{ url: string; pageCount: number | null }> {
+  if (!bookFileUrl || extension !== "pdf") return { url: bookFileUrl, pageCount: null };
+
+  let watermarkPageCount: number | null = null;
 
   try {
     const response = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/add-pdf-watermark`, {
@@ -554,8 +559,11 @@ async function addWatermarkIfPossible(bookFileUrl: string, extension: string): P
       body: JSON.stringify({ pdfUrl: bookFileUrl, bucket: "book-files" }),
     });
 
-    if (!response.ok) return bookFileUrl;
+    if (!response.ok) return { url: bookFileUrl, pageCount: null };
     const result = await response.json();
+    if (typeof result?.pageCount === "number" && result.pageCount > 0) {
+      watermarkPageCount = result.pageCount;
+    }
     const candidateUrl = result?.success && result?.watermarkedUrl ? result.watermarkedUrl : bookFileUrl;
 
     try {
@@ -568,24 +576,39 @@ async function addWatermarkIfPossible(bookFileUrl: string, extension: string): P
 
       if (!verifyResponse.ok) {
         console.warn(`[AI Bulk] رابط PDF بعد الشعار غير قابل للتحميل (${verifyResponse.status})، سيتم استخدام الأصل`);
-        return bookFileUrl;
+        return { url: bookFileUrl, pageCount: watermarkPageCount };
       }
 
       const bytes = new Uint8Array(await verifyResponse.arrayBuffer());
       const verifiedCount = await getPdfPageCount(bytes);
       if (!verifiedCount || verifiedCount < 1) {
         console.warn("[AI Bulk] تعذر التحقق من PDF بعد الشعار، سيتم استخدام الأصل");
-        return bookFileUrl;
+        return { url: bookFileUrl, pageCount: watermarkPageCount };
       }
+      return { url: candidateUrl, pageCount: verifiedCount };
     } catch (verifyError) {
       console.warn("[AI Bulk] فشل التحقق من PDF بعد الشعار، سيتم استخدام الأصل:", verifyError);
-      return bookFileUrl;
+      return { url: bookFileUrl, pageCount: watermarkPageCount };
     }
-
-    return candidateUrl;
   } catch (error) {
     console.error("[AI Bulk] فشل الشعار، سيتم استخدام PDF الأصلي:", error);
-    return bookFileUrl;
+    return { url: bookFileUrl, pageCount: watermarkPageCount };
+  }
+}
+
+// محاولة أخيرة: إعادة تحميل الـ PDF من Supabase وقياسه مباشرة عبر pdf-lib
+async function recountPdfFromUrl(pdfUrl: string): Promise<number | null> {
+  try {
+    const res = await fetch(pdfUrl, {
+      headers: { "Cache-Control": "no-cache", Accept: "application/pdf,*/*" },
+    });
+    if (!res.ok) return null;
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    if (bytes.byteLength < 1000) return null;
+    return await getPdfPageCount(bytes);
+  } catch (e) {
+    console.warn("[AI Bulk] فشلت إعادة قياس صفحات PDF:", (e as Error)?.message);
+    return null;
   }
 }
 
