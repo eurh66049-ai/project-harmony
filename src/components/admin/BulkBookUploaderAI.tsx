@@ -288,8 +288,8 @@ const BulkBookUploaderAI: React.FC<BulkBookUploaderAIProps> = ({ onUploadComplet
           `محاولة ${attempt} — دفعة ${batchNum}/${totalBatches} (${batch.length} كتاب): ${batch[0].title}${batch.length > 1 ? ` … +${batch.length - 1}` : ''}`,
         );
 
-        const batchResults = await uploadBatch(batch);
-        batchResults.forEach((result, index) => {
+        const batchResponse = await uploadBatch(batch);
+        batchResponse.results.forEach((result, index) => {
           const book = batch[index] || batch.find((b) => b.title === result.title) || batch[0];
 
           if (result.success) {
@@ -309,6 +309,10 @@ const BulkBookUploaderAI: React.FC<BulkBookUploaderAIProps> = ({ onUploadComplet
 
         setResults({ ...localResults });
         setCurrentIndex(Math.min(processed, books.length));
+        if (batchResponse.retryAfterMs > 0 && retryableBooks.length > 0 && !cancelRef.current) {
+          setCurrentTitle(`انتظار ${Math.ceil(batchResponse.retryAfterMs / 1000)} ثانية بسبب ضغط Mistral ثم المتابعة`);
+          await delay(batchResponse.retryAfterMs);
+        }
         await delay(BETWEEN_BATCH_DELAY_MS);
       }
 
