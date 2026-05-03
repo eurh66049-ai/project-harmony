@@ -676,15 +676,32 @@ async function upsertApprovedBook(book: InputBook, meta: AIBookMeta, supabaseCli
     return { success: false, title, error: "فشل توليد/رفع الغلاف (لا يوجد رابط ولا يمكن استخراجه من PDF)" };
   }
 
-  const bookFileUrl = await addWatermarkIfPossible(uploadedBook.url, uploadedBook.extension);
+  const watermarkResult = await addWatermarkIfPossible(uploadedBook.url, uploadedBook.extension);
+  const bookFileUrl = watermarkResult.url;
   const slug = existing ? undefined : generateSlug(title, meta.author);
 
-  // عدد صفحات الكتاب: نعتمد فقط على القياس الفعلي من ملف PDF (نفس آلية "انشر كتابك").
-  // لا نستخدم تخمين Mistral لأنه غير دقيق ويعطي أرقاماً خاطئة.
-  const finalPageCount =
+  // عدد صفحات الكتاب: نفس آلية "انشر كتابك" — نجرب عدة مصادر بالترتيب حتى نحصل على عدد صحيح.
+  // 1) القياس الأولي قبل الواترمارك  2) عدد الصفحات الذي يعيده add-pdf-watermark
+  // 3) إعادة قياس النسخة النهائية من Supabase Storage  4) الأصل من المصدر مرة أخرى
+  let finalPageCount: number | null =
     typeof uploadedBook.pageCount === "number" && uploadedBook.pageCount > 0
       ? uploadedBook.pageCount
       : null;
+
+  if (!finalPageCount && watermarkResult.pageCount && watermarkResult.pageCount > 0) {
+    finalPageCount = watermarkResult.pageCount;
+  }
+  if (!finalPageCount && uploadedBook.extension === "pdf") {
+    finalPageCount = await recountPdfFromUrl(bookFileUrl);
+  }
+  if (!finalPageCount && uploadedBook.extension === "pdf") {
+    finalPageCount = await recountPdfFromUrl(uploadedBook.url);
+  }
+  if (finalPageCount) {
+    console.log(`[AI Bulk] 📄 العدد النهائي لصفحات "${title}": ${finalPageCount}`);
+  } else {
+    console.warn(`[AI Bulk] ⚠️ تعذر تحديد عدد صفحات "${title}"`);
+  }
 
   const payload = {
     title,
