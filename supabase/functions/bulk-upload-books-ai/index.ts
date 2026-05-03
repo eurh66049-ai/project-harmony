@@ -371,7 +371,25 @@ async function getPdfPageCount(bytes: Uint8Array): Promise<number | null> {
     console.warn("[AI Bulk] pdf-lib فشل في قراءة الملف، سيتم تجربة fallback:", (e as Error)?.message);
   }
 
-  return getPdfPageCountFromRawStructure(bytes);
+  // Method 2: Raw PDF structure parsing
+  const rawCount = getPdfPageCountFromRawStructure(bytes);
+  if (rawCount && rawCount > 0) return rawCount;
+
+  // Method 3: mupdf (most robust, handles encrypted/malformed PDFs)
+  try {
+    const mupdf: any = await import("https://esm.sh/mupdf@1.3.0");
+    const doc = mupdf.Document.openDocument(bytes, "application/pdf");
+    const count = doc.countPages();
+    doc.destroy?.();
+    if (count > 0) {
+      console.log(`[AI Bulk] ✅ mupdf حساب عدد الصفحات: ${count}`);
+      return count;
+    }
+  } catch (e) {
+    console.warn("[AI Bulk] mupdf فشل في حساب الصفحات:", (e as Error)?.message);
+  }
+
+  return null;
 }
 
 async function inferBooksMetadata(books: InputBook[]): Promise<AIBookMeta[]> {
@@ -671,10 +689,6 @@ async function upsertApprovedBook(book: InputBook, meta: AIBookMeta, supabaseCli
     return { success: false, title, error: uploadedBook.error || "فشل رفع ملف الكتاب إلى Supabase Storage" };
   }
 
-  if (uploadedBook.extension === "pdf" && (!uploadedBook.pageCount || uploadedBook.pageCount < 1)) {
-    return { success: false, title, error: "تم رفض الكتاب لأن عدد صفحات PDF لم يُحسب فعليًا" };
-  }
-
   let coverUrl = providedCoverUrl;
   if (!coverUrl) {
     const archiveFirstPageUrl = buildArchiveFirstPageImageUrl(sourceBookUrl);
@@ -710,9 +724,22 @@ async function upsertApprovedBook(book: InputBook, meta: AIBookMeta, supabaseCli
   if (!finalPageCount && uploadedBook.extension === "pdf") {
     finalPageCount = await recountPdfFromUrl(uploadedBook.url);
   }
-  if (uploadedBook.extension === "pdf" && (!finalPageCount || finalPageCount < 1)) {
-    return { success: false, title, error: "تم رفض الكتاب: لا يمكن نشر PDF بدون عدد صفحات محسوب فعليًا" };
+  // محاولة أخيرة: mupdf مباشرة من pdfBytes الأصلي
+  if (!finalPageCount && uploadedBook.extension === "pdf" && uploadedBook.pdfBytes) {
+    try {
+      const mupdf: any = await import("https://esm.sh/mupdf@1.3.0");
+      const doc = mupdf.Document.openDocument(uploadedBook.pdfBytes, "application/pdf");
+      const count = doc.countPages();
+      doc.destroy?.();
+      if (count > 0) {
+        finalPageCount = count;
+        console.log(`[AI Bulk] ✅ mupdf (محاولة أخيرة) عدد الصفحات: ${count}`);
+      }
+    } catch (e) {
+      console.warn("[AI Bulk] mupdf (محاولة أخيرة) فشل:", (e as Error)?.message);
+    }
   }
+
   if (finalPageCount) {
     console.log(`[AI Bulk] 📄 العدد النهائي لصفحات "${title}": ${finalPageCount}`);
   } else {
