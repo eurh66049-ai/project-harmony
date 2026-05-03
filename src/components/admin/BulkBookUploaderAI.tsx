@@ -39,6 +39,7 @@ interface UploadBookResult {
   retryable?: boolean;
   error?: string;
   title?: string;
+  page_count?: number | null;
 }
 
 interface UploadBatchResult {
@@ -121,6 +122,7 @@ const BulkBookUploaderAI: React.FC<BulkBookUploaderAIProps> = ({ onUploadComplet
   const [paused, setPaused] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [currentTitle, setCurrentTitle] = useState('');
+  const [activeBookProgress, setActiveBookProgress] = useState(0);
   const [results, setResults] = useState({ success: 0, failed: 0, duplicates: 0, errors: [] as string[] });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pauseRef = useRef(false);
@@ -262,6 +264,7 @@ const BulkBookUploaderAI: React.FC<BulkBookUploaderAIProps> = ({ onUploadComplet
     pauseRef.current = false;
     cancelRef.current = false;
     setCurrentIndex(0);
+    setActiveBookProgress(0);
     setResults({ success: 0, failed: 0, duplicates: 0, errors: [] });
 
     const localResults = { success: 0, failed: 0, duplicates: 0, errors: [] as string[] };
@@ -282,13 +285,19 @@ const BulkBookUploaderAI: React.FC<BulkBookUploaderAIProps> = ({ onUploadComplet
 
         const batch = pending.slice(start, start + AI_BATCH_SIZE);
         setCurrentIndex(Math.min(processed, Math.max(books.length - 1, 0)));
+        setActiveBookProgress(8);
         const batchNum = Math.floor(start / AI_BATCH_SIZE) + 1;
         const totalBatches = Math.ceil(pending.length / AI_BATCH_SIZE);
         setCurrentTitle(
-          `محاولة ${attempt} — دفعة ${batchNum}/${totalBatches} (${batch.length} كتاب): ${batch[0].title}${batch.length > 1 ? ` … +${batch.length - 1}` : ''}`,
+          `محاولة ${attempt} — كتاب ${batchNum}/${totalBatches}: ${batch[0].title}`,
         );
 
+        const progressTimer = window.setInterval(() => {
+          setActiveBookProgress((prev) => Math.min(prev + 3, 92));
+        }, 1200);
         const batchResponse = await uploadBatch(batch);
+        window.clearInterval(progressTimer);
+        setActiveBookProgress(100);
         batchResponse.results.forEach((result, index) => {
           const book = batch[index] || batch.find((b) => b.title === result.title) || batch[0];
 
@@ -309,6 +318,7 @@ const BulkBookUploaderAI: React.FC<BulkBookUploaderAIProps> = ({ onUploadComplet
 
         setResults({ ...localResults });
         setCurrentIndex(Math.min(processed, books.length));
+        setActiveBookProgress(0);
         if (batchResponse.retryAfterMs > 0 && retryableBooks.length > 0 && !cancelRef.current) {
           setCurrentTitle(`انتظار ${Math.ceil(batchResponse.retryAfterMs / 1000)} ثانية بسبب ضغط Mistral ثم المتابعة`);
           await delay(batchResponse.retryAfterMs);
