@@ -295,7 +295,15 @@ const BulkBookUploaderAI: React.FC<BulkBookUploaderAIProps> = ({ onUploadComplet
         const progressTimer = window.setInterval(() => {
           setActiveBookProgress((prev) => Math.min(prev + 3, 92));
         }, 1200);
-        let batchResponse: UploadBatchResult;
+        let batchResponse: UploadBatchResult = {
+          retryAfterMs: RETRY_DELAY_MS,
+          results: batch.map((book) => ({
+            success: false,
+            retryable: true,
+            title: book.title,
+            error: 'انقطع طلب الرفع قبل اكتماله',
+          })),
+        };
         try {
           batchResponse = await uploadBatch(batch);
           setActiveBookProgress(100);
