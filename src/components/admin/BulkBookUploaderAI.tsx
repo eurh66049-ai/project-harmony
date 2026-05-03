@@ -39,6 +39,7 @@ interface UploadBookResult {
   retryable?: boolean;
   error?: string;
   title?: string;
+  page_count?: number | null;
 }
 
 interface UploadBatchResult {
@@ -121,6 +122,7 @@ const BulkBookUploaderAI: React.FC<BulkBookUploaderAIProps> = ({ onUploadComplet
   const [paused, setPaused] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [currentTitle, setCurrentTitle] = useState('');
+  const [activeBookProgress, setActiveBookProgress] = useState(0);
   const [results, setResults] = useState({ success: 0, failed: 0, duplicates: 0, errors: [] as string[] });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pauseRef = useRef(false);
@@ -262,6 +264,7 @@ const BulkBookUploaderAI: React.FC<BulkBookUploaderAIProps> = ({ onUploadComplet
     pauseRef.current = false;
     cancelRef.current = false;
     setCurrentIndex(0);
+    setActiveBookProgress(0);
     setResults({ success: 0, failed: 0, duplicates: 0, errors: [] });
 
     const localResults = { success: 0, failed: 0, duplicates: 0, errors: [] as string[] };
@@ -282,13 +285,31 @@ const BulkBookUploaderAI: React.FC<BulkBookUploaderAIProps> = ({ onUploadComplet
 
         const batch = pending.slice(start, start + AI_BATCH_SIZE);
         setCurrentIndex(Math.min(processed, Math.max(books.length - 1, 0)));
+        setActiveBookProgress(8);
         const batchNum = Math.floor(start / AI_BATCH_SIZE) + 1;
         const totalBatches = Math.ceil(pending.length / AI_BATCH_SIZE);
         setCurrentTitle(
-          `محاولة ${attempt} — دفعة ${batchNum}/${totalBatches} (${batch.length} كتاب): ${batch[0].title}${batch.length > 1 ? ` … +${batch.length - 1}` : ''}`,
+          `محاولة ${attempt} — كتاب ${batchNum}/${totalBatches}: ${batch[0].title}`,
         );
 
-        const batchResponse = await uploadBatch(batch);
+        const progressTimer = window.setInterval(() => {
+          setActiveBookProgress((prev) => Math.min(prev + 3, 92));
+        }, 1200);
+        let batchResponse: UploadBatchResult = {
+          retryAfterMs: RETRY_DELAY_MS,
+          results: batch.map((book) => ({
+            success: false,
+            retryable: true,
+            title: book.title,
+            error: 'انقطع طلب الرفع قبل اكتماله',
+          })),
+        };
+        try {
+          batchResponse = await uploadBatch(batch);
+          setActiveBookProgress(100);
+        } finally {
+          window.clearInterval(progressTimer);
+        }
         batchResponse.results.forEach((result, index) => {
           const book = batch[index] || batch.find((b) => b.title === result.title) || batch[0];
 
@@ -309,6 +330,7 @@ const BulkBookUploaderAI: React.FC<BulkBookUploaderAIProps> = ({ onUploadComplet
 
         setResults({ ...localResults });
         setCurrentIndex(Math.min(processed, books.length));
+        setActiveBookProgress(0);
         if (batchResponse.retryAfterMs > 0 && retryableBooks.length > 0 && !cancelRef.current) {
           setCurrentTitle(`انتظار ${Math.ceil(batchResponse.retryAfterMs / 1000)} ثانية بسبب ضغط Mistral ثم المتابعة`);
           await delay(batchResponse.retryAfterMs);
@@ -350,7 +372,9 @@ const BulkBookUploaderAI: React.FC<BulkBookUploaderAIProps> = ({ onUploadComplet
   };
 
   const totalProcessed = results.success + results.failed + results.duplicates;
-  const progress = books.length > 0 ? Math.min(100, (totalProcessed / books.length) * 100) : 0;
+  const progress = books.length > 0
+    ? Math.min(100, ((totalProcessed + (uploading ? activeBookProgress / 100 : 0)) / books.length) * 100)
+    : 0;
 
   return (
     <div className="space-y-6" dir="rtl">
@@ -486,13 +510,17 @@ https://archive.org/download/.../روائع من التاريخ العثماني
             ) : (
               <>
                 <div className="space-y-2">
-                  <div className="flex justify-between text-sm">
+                  <div className="flex items-center justify-between gap-3 text-sm">
                     <span>
-                      جارِ المعالجة: {totalProcessed} / {books.length} ({Math.round(progress)}%)
+                      جارِ المعالجة: {totalProcessed} / {books.length}
                     </span>
+                    <span className="text-2xl font-black tabular-nums text-primary">{Math.floor(progress)}%</span>
                     <span className="text-muted-foreground truncate max-w-[60%]">{currentTitle}</span>
                   </div>
                   <Progress value={progress} />
+                  <div className="text-xs text-muted-foreground">
+                    تقدم الكتاب الحالي: <strong className="text-foreground tabular-nums">{Math.round(activeBookProgress)}%</strong>
+                  </div>
                   <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
                     <span>✅ نجح: <strong className="text-foreground">{results.success}</strong></span>
                     <span>♻️ مكرر: <strong className="text-foreground">{results.duplicates}</strong></span>

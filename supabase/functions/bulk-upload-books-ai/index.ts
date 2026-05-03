@@ -38,6 +38,7 @@ interface BookResult {
   error?: string;
   id?: string;
   title?: string;
+  page_count?: number | null;
   cover_image_url?: string | null;
   book_file_url?: string | null;
   cover_uploaded_to_supabase?: boolean;
@@ -236,10 +237,10 @@ async function downloadAndUploadImage(
 async function downloadAndUploadBook(
   url: string,
   supabaseClient: any,
-): Promise<{ url: string | null; fileSize: number | null; extension: string; contentType: string; pageCount: number | null; pdfBytes: Uint8Array | null }> {
+): Promise<{ url: string | null; fileSize: number | null; extension: string; contentType: string; pageCount: number | null; pdfBytes: Uint8Array | null; error?: string }> {
   const cleanedUrl = cleanBookDownloadUrl(url || "");
   if (!cleanedUrl || !isValidUrl(cleanedUrl)) {
-    return { url: null, fileSize: null, extension: "pdf", contentType: "application/pdf", pageCount: null, pdfBytes: null };
+    return { url: null, fileSize: null, extension: "pdf", contentType: "application/pdf", pageCount: null, pdfBytes: null, error: "رابط ملف الكتاب غير صالح" };
   }
 
   try {
@@ -261,7 +262,7 @@ async function downloadAndUploadBook(
       if (pageCount) {
         console.log(`[AI Bulk] ✅ تم حساب عدد صفحات PDF: ${pageCount}`);
       } else {
-        console.warn("[AI Bulk] ⚠️ تعذر حساب عدد صفحات PDF بأي طريقة");
+        throw new Error("تعذر حساب عدد صفحات PDF بدقة، لذلك تم رفض رفع الكتاب");
       }
     }
 
@@ -285,7 +286,7 @@ async function downloadAndUploadBook(
     };
   } catch (error) {
     console.error("[AI Bulk] فشل رفع ملف الكتاب:", error);
-    return { url: null, fileSize: null, extension: "pdf", contentType: "application/pdf", pageCount: null, pdfBytes: null };
+    return { url: null, fileSize: null, extension: "pdf", contentType: "application/pdf", pageCount: null, pdfBytes: null, error: error instanceof Error ? error.message : "فشل رفع ملف الكتاب" };
   }
 }
 
@@ -333,10 +334,31 @@ async function generateCoverFromPdf(
   }
 }
 
-// حساب عدد صفحات PDF بدقة - الطريقة الأساسية: pdf-lib (نفس قسم "انشر كتابك")
-// مع fallback على تحليل البنية الخام في حال فشل pdf-lib
+function getPdfPageCountFromRawStructure(bytes: Uint8Array): number | null {
+  try {
+    const text = new TextDecoder("latin1").decode(bytes);
+    let maxCount = 0;
+    for (const match of text.matchAll(/\/Type\s*\/Pages\b[\s\S]{0,800}?\/Count\s+(\d+)/g)) {
+      const n = Number(match[1]);
+      if (Number.isFinite(n) && n > maxCount) maxCount = n;
+    }
+    if (maxCount > 0) return maxCount;
+
+    const pageObjects = text.match(/\/Type\s*\/Page\b(?!s)/g);
+    if (pageObjects?.length) return pageObjects.length;
+  } catch (error) {
+    console.warn("[AI Bulk] فشل تحليل بنية PDF الخام:", (error as Error)?.message);
+  }
+  return null;
+}
+
+// حساب عدد صفحات PDF بدقة - نفس جوهر "انشر كتابك": قراءة PDF فعليًا، مع fallback صارم للبنية الخام.
 async function getPdfPageCount(bytes: Uint8Array): Promise<number | null> {
-  // المحاولة الأساسية والأكثر دقة: pdf-lib
+  if (!bytes || bytes.byteLength < 1024) return null;
+
+  const header = new TextDecoder("latin1").decode(bytes.slice(0, 8));
+  if (!header.startsWith("%PDF-")) return null;
+
   try {
     const pdfDoc = await PDFDocument.load(bytes, {
       ignoreEncryption: true,
@@ -349,30 +371,7 @@ async function getPdfPageCount(bytes: Uint8Array): Promise<number | null> {
     console.warn("[AI Bulk] pdf-lib فشل في قراءة الملف، سيتم تجربة fallback:", (e as Error)?.message);
   }
 
-  // Fallback: تحليل البنية الخام
-  try {
-    const decoder = new TextDecoder("latin1");
-    const text = decoder.decode(bytes);
-
-    // المحاولة 1: قراءة /Count من شجرة الصفحات الجذر (الأكثر موثوقية في الـ regex)
-    const countRegex = /\/Count\s+(\d+)/g;
-    let max = 0;
-    let m: RegExpExecArray | null;
-    while ((m = countRegex.exec(text)) !== null) {
-      const n = parseInt(m[1], 10);
-      if (n > max) max = n;
-    }
-    if (max > 0) return max;
-
-    // المحاولة 2: عدّ /Type /Page (لكن ليس /Pages)
-    const pageObjRegex = /\/Type\s*\/Page(?![sA-Za-z])/g;
-    const matches = text.match(pageObjRegex);
-    if (matches && matches.length > 0) return matches.length;
-
-    return null;
-  } catch {
-    return null;
-  }
+  return getPdfPageCountFromRawStructure(bytes);
 }
 
 async function inferBooksMetadata(books: InputBook[]): Promise<AIBookMeta[]> {
@@ -669,7 +668,11 @@ async function upsertApprovedBook(book: InputBook, meta: AIBookMeta, supabaseCli
   ]);
 
   if (!uploadedBook.url) {
-    return { success: false, title, error: "فشل رفع ملف الكتاب إلى Supabase Storage" };
+    return { success: false, title, error: uploadedBook.error || "فشل رفع ملف الكتاب إلى Supabase Storage" };
+  }
+
+  if (uploadedBook.extension === "pdf" && (!uploadedBook.pageCount || uploadedBook.pageCount < 1)) {
+    return { success: false, title, error: "تم رفض الكتاب لأن عدد صفحات PDF لم يُحسب فعليًا" };
   }
 
   let coverUrl = providedCoverUrl;
@@ -706,6 +709,9 @@ async function upsertApprovedBook(book: InputBook, meta: AIBookMeta, supabaseCli
   }
   if (!finalPageCount && uploadedBook.extension === "pdf") {
     finalPageCount = await recountPdfFromUrl(uploadedBook.url);
+  }
+  if (uploadedBook.extension === "pdf" && (!finalPageCount || finalPageCount < 1)) {
+    return { success: false, title, error: "تم رفض الكتاب: لا يمكن نشر PDF بدون عدد صفحات محسوب فعليًا" };
   }
   if (finalPageCount) {
     console.log(`[AI Bulk] 📄 العدد النهائي لصفحات "${title}": ${finalPageCount}`);
@@ -754,6 +760,7 @@ async function upsertApprovedBook(book: InputBook, meta: AIBookMeta, supabaseCli
       success: true,
       id: updated?.id,
       title,
+      page_count: finalPageCount,
       cover_image_url: coverUrl,
       book_file_url: bookFileUrl,
       cover_uploaded_to_supabase: true,
@@ -781,6 +788,7 @@ async function upsertApprovedBook(book: InputBook, meta: AIBookMeta, supabaseCli
     success: true,
     id: inserted?.id,
     title,
+    page_count: finalPageCount,
     cover_image_url: coverUrl,
     book_file_url: bookFileUrl,
     cover_uploaded_to_supabase: true,
