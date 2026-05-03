@@ -334,10 +334,31 @@ async function generateCoverFromPdf(
   }
 }
 
-// حساب عدد صفحات PDF بدقة - الطريقة الأساسية: pdf-lib (نفس قسم "انشر كتابك")
-// مع fallback على تحليل البنية الخام في حال فشل pdf-lib
+function getPdfPageCountFromRawStructure(bytes: Uint8Array): number | null {
+  try {
+    const text = new TextDecoder("latin1").decode(bytes);
+    let maxCount = 0;
+    for (const match of text.matchAll(/\/Type\s*\/Pages\b[\s\S]{0,800}?\/Count\s+(\d+)/g)) {
+      const n = Number(match[1]);
+      if (Number.isFinite(n) && n > maxCount) maxCount = n;
+    }
+    if (maxCount > 0) return maxCount;
+
+    const pageObjects = text.match(/\/Type\s*\/Page\b(?!s)/g);
+    if (pageObjects?.length) return pageObjects.length;
+  } catch (error) {
+    console.warn("[AI Bulk] فشل تحليل بنية PDF الخام:", (error as Error)?.message);
+  }
+  return null;
+}
+
+// حساب عدد صفحات PDF بدقة - نفس جوهر "انشر كتابك": قراءة PDF فعليًا، مع fallback صارم للبنية الخام.
 async function getPdfPageCount(bytes: Uint8Array): Promise<number | null> {
-  // المحاولة الأساسية والأكثر دقة: pdf-lib
+  if (!bytes || bytes.byteLength < 1024) return null;
+
+  const header = new TextDecoder("latin1").decode(bytes.slice(0, 8));
+  if (!header.startsWith("%PDF-")) return null;
+
   try {
     const pdfDoc = await PDFDocument.load(bytes, {
       ignoreEncryption: true,
@@ -350,30 +371,7 @@ async function getPdfPageCount(bytes: Uint8Array): Promise<number | null> {
     console.warn("[AI Bulk] pdf-lib فشل في قراءة الملف، سيتم تجربة fallback:", (e as Error)?.message);
   }
 
-  // Fallback: تحليل البنية الخام
-  try {
-    const decoder = new TextDecoder("latin1");
-    const text = decoder.decode(bytes);
-
-    // المحاولة 1: قراءة /Count من شجرة الصفحات الجذر (الأكثر موثوقية في الـ regex)
-    const countRegex = /\/Count\s+(\d+)/g;
-    let max = 0;
-    let m: RegExpExecArray | null;
-    while ((m = countRegex.exec(text)) !== null) {
-      const n = parseInt(m[1], 10);
-      if (n > max) max = n;
-    }
-    if (max > 0) return max;
-
-    // المحاولة 2: عدّ /Type /Page (لكن ليس /Pages)
-    const pageObjRegex = /\/Type\s*\/Page(?![sA-Za-z])/g;
-    const matches = text.match(pageObjRegex);
-    if (matches && matches.length > 0) return matches.length;
-
-    return null;
-  } catch {
-    return null;
-  }
+  return getPdfPageCountFromRawStructure(bytes);
 }
 
 async function inferBooksMetadata(books: InputBook[]): Promise<AIBookMeta[]> {
