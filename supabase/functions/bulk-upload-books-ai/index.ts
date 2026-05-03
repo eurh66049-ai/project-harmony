@@ -668,7 +668,11 @@ async function upsertApprovedBook(book: InputBook, meta: AIBookMeta, supabaseCli
   ]);
 
   if (!uploadedBook.url) {
-    return { success: false, title, error: "فشل رفع ملف الكتاب إلى Supabase Storage" };
+    return { success: false, title, error: uploadedBook.error || "فشل رفع ملف الكتاب إلى Supabase Storage" };
+  }
+
+  if (uploadedBook.extension === "pdf" && (!uploadedBook.pageCount || uploadedBook.pageCount < 1)) {
+    return { success: false, title, error: "تم رفض الكتاب لأن عدد صفحات PDF لم يُحسب فعليًا" };
   }
 
   let coverUrl = providedCoverUrl;
@@ -705,6 +709,9 @@ async function upsertApprovedBook(book: InputBook, meta: AIBookMeta, supabaseCli
   }
   if (!finalPageCount && uploadedBook.extension === "pdf") {
     finalPageCount = await recountPdfFromUrl(uploadedBook.url);
+  }
+  if (uploadedBook.extension === "pdf" && (!finalPageCount || finalPageCount < 1)) {
+    return { success: false, title, error: "تم رفض الكتاب: لا يمكن نشر PDF بدون عدد صفحات محسوب فعليًا" };
   }
   if (finalPageCount) {
     console.log(`[AI Bulk] 📄 العدد النهائي لصفحات "${title}": ${finalPageCount}`);
@@ -753,6 +760,7 @@ async function upsertApprovedBook(book: InputBook, meta: AIBookMeta, supabaseCli
       success: true,
       id: updated?.id,
       title,
+      page_count: finalPageCount,
       cover_image_url: coverUrl,
       book_file_url: bookFileUrl,
       cover_uploaded_to_supabase: true,
@@ -780,6 +788,7 @@ async function upsertApprovedBook(book: InputBook, meta: AIBookMeta, supabaseCli
     success: true,
     id: inserted?.id,
     title,
+    page_count: finalPageCount,
     cover_image_url: coverUrl,
     book_file_url: bookFileUrl,
     cover_uploaded_to_supabase: true,
