@@ -502,13 +502,17 @@ https://archive.org/download/.../روائع من التاريخ العثماني
             ) : (
               <>
                 <div className="space-y-2">
-                  <div className="flex justify-between text-sm">
+                  <div className="flex items-center justify-between gap-3 text-sm">
                     <span>
-                      جارِ المعالجة: {totalProcessed} / {books.length} ({Math.round(progress)}%)
+                      جارِ المعالجة: {totalProcessed} / {books.length}
                     </span>
+                    <span className="text-2xl font-black tabular-nums text-primary">{Math.floor(progress)}%</span>
                     <span className="text-muted-foreground truncate max-w-[60%]">{currentTitle}</span>
                   </div>
                   <Progress value={progress} />
+                  <div className="text-xs text-muted-foreground">
+                    تقدم الكتاب الحالي: <strong className="text-foreground tabular-nums">{Math.round(activeBookProgress)}%</strong>
+                  </div>
                   <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
                     <span>✅ نجح: <strong className="text-foreground">{results.success}</strong></span>
                     <span>♻️ مكرر: <strong className="text-foreground">{results.duplicates}</strong></span>
