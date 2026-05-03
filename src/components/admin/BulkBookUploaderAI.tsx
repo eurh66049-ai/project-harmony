@@ -26,9 +26,9 @@ const SAMPLE_CSV = `title,book_file_url
 الإيمان وتكامل الإنسان - kotobi,https://archive.org/download/kotobi_202605/الإيمان وتكامل الإنسان - kotobi.pdf
 روائع من التاريخ العثماني - kotobi,https://archive.org/download/kotobi_202605/روائع من التاريخ العثماني - kotobi.pdf`;
 
-const AI_BATCH_SIZE = 25;
+const AI_BATCH_SIZE = 1;
 const MAX_BOOKS_PER_RUN = 1000;
-const BETWEEN_BATCH_DELAY_MS = 800;
+const BETWEEN_BATCH_DELAY_MS = 300;
 const RETRY_DELAY_MS = 20000;
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -39,6 +39,11 @@ interface UploadBookResult {
   retryable?: boolean;
   error?: string;
   title?: string;
+}
+
+interface UploadBatchResult {
+  results: UploadBookResult[];
+  retryAfterMs: number;
 }
 
 // تطبيع العنوان لكشف التكرار (إزالة _text، -kotobi، الامتدادات والمسافات)
@@ -205,31 +210,38 @@ const BulkBookUploaderAI: React.FC<BulkBookUploaderAIProps> = ({ onUploadComplet
     toast({ title: 'تم تجهيز الكتب', description: `${deduped.length} كتاب جاهز للرفع` });
   };
 
-  const uploadBatch = async (batch: SimpleBook[]): Promise<UploadBookResult[]> => {
+  const uploadBatch = async (batch: SimpleBook[]): Promise<UploadBatchResult> => {
     const { data, error } = await supabase.functions.invoke('bulk-upload-books-ai', {
       body: { books: batch },
     });
 
     if (error) {
-      return batch.map((book) => ({
-        success: false,
-        retryable: true,
-        title: book.title,
-        error: error.message || 'تعذر الاتصال بدالة الرفع',
-      }));
+      return {
+        retryAfterMs: RETRY_DELAY_MS,
+        results: batch.map((book) => ({
+          success: false,
+          retryable: true,
+          title: book.title,
+          error: error.message || 'تعذر الاتصال بدالة الرفع',
+        })),
+      };
     }
 
-    if (Array.isArray(data?.results)) return data.results;
+    const retryAfterMs = typeof data?.retry_after_ms === 'number' ? data.retry_after_ms : 0;
+    if (Array.isArray(data?.results)) return { results: data.results, retryAfterMs };
 
     if (data?.success && data?.book) {
-      return [{ success: true, title: data.book.title }];
+      return { results: [{ success: true, title: data.book.title }], retryAfterMs };
     }
 
-    return batch.map((book) => ({
-      success: false,
-      title: book.title,
-      error: data?.error || 'خطأ غير معروف',
-    }));
+    return {
+      retryAfterMs,
+      results: batch.map((book) => ({
+        success: false,
+        title: book.title,
+        error: data?.error || 'خطأ غير معروف',
+      })),
+    };
   };
 
   const startUpload = async () => {
