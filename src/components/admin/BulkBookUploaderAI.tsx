@@ -26,10 +26,10 @@ const SAMPLE_CSV = `title,book_file_url
 الإيمان وتكامل الإنسان - kotobi,https://archive.org/download/kotobi_202605/الإيمان وتكامل الإنسان - kotobi.pdf
 روائع من التاريخ العثماني - kotobi,https://archive.org/download/kotobi_202605/روائع من التاريخ العثماني - kotobi.pdf`;
 
-const AI_BATCH_SIZE = 1;
+const AI_BATCH_SIZE = 25;
 const MAX_BOOKS_PER_RUN = 1000;
-const BETWEEN_BATCH_DELAY_MS = 300;
-const RETRY_DELAY_MS = 20000;
+const BETWEEN_BATCH_DELAY_MS = 500;
+const RETRY_DELAY_MS = 25000;
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -289,12 +289,12 @@ const BulkBookUploaderAI: React.FC<BulkBookUploaderAIProps> = ({ onUploadComplet
         const batchNum = Math.floor(start / AI_BATCH_SIZE) + 1;
         const totalBatches = Math.ceil(pending.length / AI_BATCH_SIZE);
         setCurrentTitle(
-          `محاولة ${attempt} — كتاب ${batchNum}/${totalBatches}: ${batch[0].title}`,
+          `محاولة ${attempt} — دفعة ${batchNum}/${totalBatches} (${batch.length} كتاب): ${batch[0].title}...`,
         );
 
         const progressTimer = window.setInterval(() => {
-          setActiveBookProgress((prev) => Math.min(prev + 3, 92));
-        }, 1200);
+          setActiveBookProgress((prev) => Math.min(prev + 1, 92));
+        }, 2000);
         let batchResponse: UploadBatchResult = {
           retryAfterMs: RETRY_DELAY_MS,
           results: batch.map((book) => ({
@@ -332,7 +332,7 @@ const BulkBookUploaderAI: React.FC<BulkBookUploaderAIProps> = ({ onUploadComplet
         setCurrentIndex(Math.min(processed, books.length));
         setActiveBookProgress(0);
         if (batchResponse.retryAfterMs > 0 && retryableBooks.length > 0 && !cancelRef.current) {
-          setCurrentTitle(`انتظار ${Math.ceil(batchResponse.retryAfterMs / 1000)} ثانية بسبب ضغط Mistral ثم المتابعة`);
+          setCurrentTitle(`⏳ انتظار ${Math.ceil(batchResponse.retryAfterMs / 1000)} ثانية بسبب ضغط Mistral ثم المتابعة...`);
           await delay(batchResponse.retryAfterMs);
         }
         await delay(BETWEEN_BATCH_DELAY_MS);
@@ -340,7 +340,7 @@ const BulkBookUploaderAI: React.FC<BulkBookUploaderAIProps> = ({ onUploadComplet
 
       pending = retryableBooks;
       if (pending.length > 0 && attempt < 4 && !cancelRef.current) {
-        setCurrentTitle(`انتظار ${RETRY_DELAY_MS / 1000} ثانية ثم إعادة محاولة ${pending.length} كتاب بسبب حد Mistral`);
+        setCurrentTitle(`⏳ انتظار ${RETRY_DELAY_MS / 1000} ثانية ثم إعادة محاولة ${pending.length} كتاب...`);
         await delay(RETRY_DELAY_MS);
       }
     }
