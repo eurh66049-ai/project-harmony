@@ -38,6 +38,7 @@ interface BookResult {
   error?: string;
   id?: string;
   title?: string;
+  page_count?: number | null;
   cover_image_url?: string | null;
   book_file_url?: string | null;
   cover_uploaded_to_supabase?: boolean;
@@ -236,10 +237,10 @@ async function downloadAndUploadImage(
 async function downloadAndUploadBook(
   url: string,
   supabaseClient: any,
-): Promise<{ url: string | null; fileSize: number | null; extension: string; contentType: string; pageCount: number | null; pdfBytes: Uint8Array | null }> {
+): Promise<{ url: string | null; fileSize: number | null; extension: string; contentType: string; pageCount: number | null; pdfBytes: Uint8Array | null; error?: string }> {
   const cleanedUrl = cleanBookDownloadUrl(url || "");
   if (!cleanedUrl || !isValidUrl(cleanedUrl)) {
-    return { url: null, fileSize: null, extension: "pdf", contentType: "application/pdf", pageCount: null, pdfBytes: null };
+    return { url: null, fileSize: null, extension: "pdf", contentType: "application/pdf", pageCount: null, pdfBytes: null, error: "رابط ملف الكتاب غير صالح" };
   }
 
   try {
@@ -261,7 +262,7 @@ async function downloadAndUploadBook(
       if (pageCount) {
         console.log(`[AI Bulk] ✅ تم حساب عدد صفحات PDF: ${pageCount}`);
       } else {
-        console.warn("[AI Bulk] ⚠️ تعذر حساب عدد صفحات PDF بأي طريقة");
+        throw new Error("تعذر حساب عدد صفحات PDF بدقة، لذلك تم رفض رفع الكتاب");
       }
     }
 
@@ -285,7 +286,7 @@ async function downloadAndUploadBook(
     };
   } catch (error) {
     console.error("[AI Bulk] فشل رفع ملف الكتاب:", error);
-    return { url: null, fileSize: null, extension: "pdf", contentType: "application/pdf", pageCount: null, pdfBytes: null };
+    return { url: null, fileSize: null, extension: "pdf", contentType: "application/pdf", pageCount: null, pdfBytes: null, error: error instanceof Error ? error.message : "فشل رفع ملف الكتاب" };
   }
 }
 
