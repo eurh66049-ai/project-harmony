@@ -379,31 +379,39 @@ async function inferBooksMetadata(books: InputBook[]): Promise<AIBookMeta[]> {
   const MISTRAL_API_KEY = Deno.env.get("MISTRAL_API_KEY");
   if (!MISTRAL_API_KEY) throw new Error("MISTRAL_API_KEY غير مهيأ");
 
-  const systemPrompt = `أنت خبير ببليوغرافي متخصص في الكتب العربية والعالمية، ولديك معرفة واسعة بالمؤلفين الكلاسيكيين والمعاصرين.
-مهمتك الأساسية: تحديد اسم المؤلف الحقيقي لكل كتاب بدقة عالية، وكتابة نبذة تعريفية عنه.
+  const systemPrompt = `أنت خبير ببليوغرافي عالمي من الطراز الأول، متخصص في الكتب العربية والمترجمة والتراث الإسلامي والأدب العالمي. لديك معرفة موسوعية بالمؤلفين الكلاسيكيين والمعاصرين.
 
-أرجع JSON فقط على شكل: {"books":[...]}. لكل كتاب أعد نفس index.
+مهمتك الحاسمة: لكل كتاب أرسله لك، حدّد المؤلف الحقيقي بدقة قصوى، واكتب وصفًا فريدًا حقيقيًا غير مكرر يخص هذا الكتاب تحديدًا — ليس قالبًا عامًا.
+
+أرجع JSON فقط بالشكل: {"books":[...]}. لكل كتاب أعد نفس index الذي أرسلته.
 
 الحقول المطلوبة لكل عنصر:
 - index: رقم الكتاب كما أرسلته
-- author: اسم المؤلف الحقيقي بالعربية (مثل: "نجيب محفوظ"، "ويليام شكسبير"، "غسان كنفاني"). ابحث في معرفتك بعمق:
-    * إذا كان عنوان الكتاب مشهورًا (روايات، تراث، فلسفة، تاريخ، دين، أدب عالمي) فالمؤلف معروف بالتأكيد — أعد اسمه.
-    * إذا كان العنوان يتضمن اسم المؤلف صراحةً (مثلًا "ديوان المتنبي"، "مقدمة ابن خلدون") استخرجه.
-    * إذا تطابق العنوان مع كتاب مترجم عالمي، أعد اسم المؤلف الأصلي معرّبًا.
-    * لا تستخدم "غير معروف" إلا إذا كان العنوان غامضًا تمامًا أو مجهول المؤلف فعلًا (مثل بعض كتب التراث المجهولة). يجب أن تكون نسبة "غير معروف" أقل من 5%.
-- author_bio: نبذة عربية مفيدة عن المؤلف (3-5 جمل): تاريخ الميلاد/الوفاة إن أمكن، الجنسية، أبرز أعماله، مكانته الأدبية أو الفكرية. لا تتركها null إلا إذا كان المؤلف "غير معروف" فعلًا.
+- author: اسم المؤلف الحقيقي بالعربية الفصحى الكاملة (مثل: "نجيب محفوظ"، "ويليام شكسبير"، "غسان كنفاني"، "أبو حامد الغزالي").
+    * إن كان العنوان مشهورًا (روايات، تراث، فلسفة، تاريخ، دين، أدب عالمي) فالمؤلف معروف قطعًا — أعد اسمه.
+    * إن تضمن العنوان اسم المؤلف صراحة (مثل "ديوان المتنبي"، "مقدمة ابن خلدون") فاستخرجه.
+    * إن تطابق العنوان مع كتاب مترجم عالمي، أعد اسم المؤلف الأصلي معرّبًا بأشهر صياغة عربية له.
+    * "غير معروف" مسموح فقط للكتب المجهولة المؤلف فعلًا في التراث (نسبة < 3%).
+- author_bio: نبذة عربية ثرية ومحددة عن هذا المؤلف بالذات (4-6 جمل): تواريخ الميلاد والوفاة، الجنسية، أبرز أعماله بالاسم، تياره الفكري أو الأدبي، مكانته. لا تعتمد قوالب عامة.
 - category: واحد فقط من: ${ALLOWED_CATEGORIES.join(", ")}
-- description: وصف عربي دقيق ومفيد للكتاب 3-5 جمل (الموضوع، الفكرة الرئيسية، أهميته)
+- description: **وصف فريد وحقيقي وحصري لهذا الكتاب بالذات** بالعربية الفصحى (5-7 جمل). يجب أن يتضمن:
+    1) موضوع الكتاب الفعلي ومضمونه الرئيسي (لا عبارات إنشائية).
+    2) الأفكار أو الأحداث المحورية فيه.
+    3) أسلوب الكاتب وما يميّز هذا العمل عن غيره.
+    4) أهميته العلمية أو الأدبية ولماذا يستحق القراءة.
+    ممنوع منعًا باتًا: "كتاب قيّم"، "متاح للقراءة"، "من أهم الكتب"، أو أي صياغة عامة قابلة للتطبيق على أي كتاب آخر. كل وصف يجب أن يكون مختلفًا تمامًا عن الباقي.
 - language: واحد فقط من: ${ALLOWED_LANGUAGES.join(", ")}
 - publication_year: سنة النشر الأصلية رقم أو null
-- page_count: رقم تقريبي أو null
+- page_count: null دائمًا (سنحسبه من الملف الفعلي)
 - publisher: دار النشر إن عُرفت أو null
 - subtitle: العنوان الفرعي إن وُجد أو null
 
 قواعد صارمة:
-1. لا تخترع مؤلفًا إذا لم تكن متأكدًا — لكن ابذل جهدًا حقيقيًا للتعرف على المؤلف من العنوان.
-2. لا تضف أي نص خارج JSON.
-3. الأسماء بالعربية دائمًا.`;
+1. ابذل أقصى جهد للتعرف على المؤلف — لا تستسلم وتكتب "غير معروف" بسهولة.
+2. كل وصف يجب أن يكون فريدًا 100% — لا تتكرر بين الكتب.
+3. لا تخترع معلومات غير موجودة في معرفتك. إن لم تكن متأكدًا من تفصيلة، تجنبها.
+4. لا تضف أي نص خارج JSON.
+5. الأسماء والأوصاف بالعربية الفصحى دائمًا.`;
 
   const userPrompt = books
     .map((book, index) => `${index}. ${book.title}`)
@@ -421,7 +429,9 @@ async function inferBooksMetadata(books: InputBook[]): Promise<AIBookMeta[]> {
         },
         body: JSON.stringify({
           model: "mistral-large-latest",
-          temperature: 0.1,
+          temperature: 0.4,
+          top_p: 0.95,
+          max_tokens: 8000,
           response_format: { type: "json_object" },
           messages: [
             { role: "system", content: systemPrompt },
@@ -541,8 +551,13 @@ async function retryAuthorLookup(
   });
 }
 
-async function addWatermarkIfPossible(bookFileUrl: string, extension: string): Promise<string> {
-  if (!bookFileUrl || extension !== "pdf") return bookFileUrl;
+async function addWatermarkIfPossible(
+  bookFileUrl: string,
+  extension: string,
+): Promise<{ url: string; pageCount: number | null }> {
+  if (!bookFileUrl || extension !== "pdf") return { url: bookFileUrl, pageCount: null };
+
+  let watermarkPageCount: number | null = null;
 
   try {
     const response = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/add-pdf-watermark`, {
@@ -554,8 +569,11 @@ async function addWatermarkIfPossible(bookFileUrl: string, extension: string): P
       body: JSON.stringify({ pdfUrl: bookFileUrl, bucket: "book-files" }),
     });
 
-    if (!response.ok) return bookFileUrl;
+    if (!response.ok) return { url: bookFileUrl, pageCount: null };
     const result = await response.json();
+    if (typeof result?.pageCount === "number" && result.pageCount > 0) {
+      watermarkPageCount = result.pageCount;
+    }
     const candidateUrl = result?.success && result?.watermarkedUrl ? result.watermarkedUrl : bookFileUrl;
 
     try {
@@ -568,24 +586,39 @@ async function addWatermarkIfPossible(bookFileUrl: string, extension: string): P
 
       if (!verifyResponse.ok) {
         console.warn(`[AI Bulk] رابط PDF بعد الشعار غير قابل للتحميل (${verifyResponse.status})، سيتم استخدام الأصل`);
-        return bookFileUrl;
+        return { url: bookFileUrl, pageCount: watermarkPageCount };
       }
 
       const bytes = new Uint8Array(await verifyResponse.arrayBuffer());
       const verifiedCount = await getPdfPageCount(bytes);
       if (!verifiedCount || verifiedCount < 1) {
         console.warn("[AI Bulk] تعذر التحقق من PDF بعد الشعار، سيتم استخدام الأصل");
-        return bookFileUrl;
+        return { url: bookFileUrl, pageCount: watermarkPageCount };
       }
+      return { url: candidateUrl, pageCount: verifiedCount };
     } catch (verifyError) {
       console.warn("[AI Bulk] فشل التحقق من PDF بعد الشعار، سيتم استخدام الأصل:", verifyError);
-      return bookFileUrl;
+      return { url: bookFileUrl, pageCount: watermarkPageCount };
     }
-
-    return candidateUrl;
   } catch (error) {
     console.error("[AI Bulk] فشل الشعار، سيتم استخدام PDF الأصلي:", error);
-    return bookFileUrl;
+    return { url: bookFileUrl, pageCount: watermarkPageCount };
+  }
+}
+
+// محاولة أخيرة: إعادة تحميل الـ PDF من Supabase وقياسه مباشرة عبر pdf-lib
+async function recountPdfFromUrl(pdfUrl: string): Promise<number | null> {
+  try {
+    const res = await fetch(pdfUrl, {
+      headers: { "Cache-Control": "no-cache", Accept: "application/pdf,*/*" },
+    });
+    if (!res.ok) return null;
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    if (bytes.byteLength < 1000) return null;
+    return await getPdfPageCount(bytes);
+  } catch (e) {
+    console.warn("[AI Bulk] فشلت إعادة قياس صفحات PDF:", (e as Error)?.message);
+    return null;
   }
 }
 
@@ -653,15 +686,32 @@ async function upsertApprovedBook(book: InputBook, meta: AIBookMeta, supabaseCli
     return { success: false, title, error: "فشل توليد/رفع الغلاف (لا يوجد رابط ولا يمكن استخراجه من PDF)" };
   }
 
-  const bookFileUrl = await addWatermarkIfPossible(uploadedBook.url, uploadedBook.extension);
+  const watermarkResult = await addWatermarkIfPossible(uploadedBook.url, uploadedBook.extension);
+  const bookFileUrl = watermarkResult.url;
   const slug = existing ? undefined : generateSlug(title, meta.author);
 
-  // عدد صفحات الكتاب: نعتمد فقط على القياس الفعلي من ملف PDF (نفس آلية "انشر كتابك").
-  // لا نستخدم تخمين Mistral لأنه غير دقيق ويعطي أرقاماً خاطئة.
-  const finalPageCount =
+  // عدد صفحات الكتاب: نفس آلية "انشر كتابك" — نجرب عدة مصادر بالترتيب حتى نحصل على عدد صحيح.
+  // 1) القياس الأولي قبل الواترمارك  2) عدد الصفحات الذي يعيده add-pdf-watermark
+  // 3) إعادة قياس النسخة النهائية من Supabase Storage  4) الأصل من المصدر مرة أخرى
+  let finalPageCount: number | null =
     typeof uploadedBook.pageCount === "number" && uploadedBook.pageCount > 0
       ? uploadedBook.pageCount
       : null;
+
+  if (!finalPageCount && watermarkResult.pageCount && watermarkResult.pageCount > 0) {
+    finalPageCount = watermarkResult.pageCount;
+  }
+  if (!finalPageCount && uploadedBook.extension === "pdf") {
+    finalPageCount = await recountPdfFromUrl(bookFileUrl);
+  }
+  if (!finalPageCount && uploadedBook.extension === "pdf") {
+    finalPageCount = await recountPdfFromUrl(uploadedBook.url);
+  }
+  if (finalPageCount) {
+    console.log(`[AI Bulk] 📄 العدد النهائي لصفحات "${title}": ${finalPageCount}`);
+  } else {
+    console.warn(`[AI Bulk] ⚠️ تعذر تحديد عدد صفحات "${title}"`);
+  }
 
   const payload = {
     title,
